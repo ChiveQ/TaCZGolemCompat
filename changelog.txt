@@ -1,0 +1,14 @@
+1.0.3
+- Fix potential mod conflict with mods changing how block entities are ticked
+- Increase cataclysm trials equipment drop rate
+
+1.0.2
+- Add Reforge upgrade and Resistance upgrade
+- Add Ironwood / Knightmetal / Fiery giant pickaxe
+- Add giant upgrade for Twilight Forest integration
+
+1.0.1
+- Fix Ancient Factory
+
+1.0.0
+- Initial Release

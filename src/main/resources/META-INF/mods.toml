@@ -1,0 +1,40 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="LGPL-2.1"
+[[mods]]
+modId="taczgolemcompat"
+version="${file.jarVersion}" #mandatory
+displayName="Golem Dungeons" #mandatory
+logoFile="taczgolemcompat.png" #optional
+credits="LightLand team and Nulladev Team" #optional
+authors="lcy0x1" #optional
+description='''
+'''
+[[dependencies.taczgolemcompat]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47.1.0,)"
+    ordering="AFTER"
+    side="BOTH"
+[[dependencies.taczgolemcompat]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20,1.21)"
+    ordering="NONE"
+    side="BOTH"
+[[dependencies.taczgolemcompat]]
+    modId="l2library"
+    mandatory=true
+    versionRange="[2.5.3,)"
+    ordering="AFTER"
+    side="BOTH"
+[[dependencies.taczgolemcompat]]
+    modId="modulargolems"
+    mandatory=true
+    versionRange="[2.6.7,)"
+    side="BOTH"
+[[dependencies.taczgolemcompat]]
+    modId="tacz"
+    mandatory=true
+    versionRange="[0,)"
+    side="BOTH"

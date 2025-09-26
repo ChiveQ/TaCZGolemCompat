@@ -1,0 +1,266 @@
+import net.darkhax.curseforgegradle.TaskPublishCurseForge
+
+buildscript {
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        mavenCentral()
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public' }
+    }
+    dependencies {
+        classpath "org.spongepowered:mixingradle:${mixingradle_version}"
+        classpath 'org.parchmentmc:librarian:1.+'
+    }
+}
+
+plugins {
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'net.darkhax.curseforgegradle' version '[1.1.24,)'
+    id "at.stnwtr.gradle-secrets-plugin" version "1.0.1"
+    id "com.modrinth.minotaur" version "2.+"
+}
+
+apply plugin: 'maven-publish'
+apply plugin: 'org.spongepowered.mixin'
+apply plugin: 'org.parchmentmc.librarian.forgegradle'
+
+version = "${ll_version}"
+group = "dev.kxmc.${modid}"
+archivesBaseName = "${modid}"
+
+if (lljij.toBoolean()) jarJar.enable()
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    //mappings channel: 'parchment', version: '1.19.3-2023.03.12-1.19.4'
+    mappings channel: 'official', version: "${minecraft_version}"
+    accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'info'
+            mods {
+                "${modid}" {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        server {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'info'
+            mods {
+                "${modid}" {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        data {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'info'
+
+            // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
+            args '--mod', "${modid}", '--existing-mod', 'twilightforest', '--existing-mod', 'modulargolems', '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+
+            mods {
+                "${modid}" {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+mixin {
+    add sourceSets.main, "${modid}.refmap.json"
+    config "${modid}.mixins.json"
+}
+
+jar {
+    manifest {
+        attributes([
+                "Specification-Title"     : "${modid}",
+                "Specification-Vendor"    : "xkmc",
+                "Specification-Version"   : "1", // We are version 1 of ourselves
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.jar.archiveVersion,
+                "Implementation-Vendor"   : "xkmc",
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+                'MixinConfigs'            : "${modid}.mixins.json"
+        ])
+    }
+}
+
+java {
+    withSourcesJar()
+}
+
+jar.finalizedBy('reobfJar')
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifact jar
+        }
+    }
+    repositories {
+        maven {
+            url "file://${project.projectDir}/mcmodsrepo"
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+if (lljij.toBoolean()) {
+
+    reobf {
+        jarJar {}
+    }
+
+    tasks.jarJar.finalizedBy('reobfJarJar')
+
+    tasks.jarJar.configure {
+        archiveClassifier.set('')
+    }
+
+    jar {
+        archiveClassifier.set('slim')
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    compileOnly(annotationProcessor("com.github.llamalad7.mixinextras:mixinextras-common:${mixin_extras_version}"))
+    if (rootMod.toBoolean()) {
+        implementation(jarJar("com.github.llamalad7.mixinextras:mixinextras-forge:${mixin_extras_version}")) {
+            transitive = false
+            jarJar.ranged(it, "[${mixin_extras_version},)")
+        }
+    } else {
+        implementation("com.github.llamalad7.mixinextras:mixinextras-forge:${mixin_extras_version}")
+    }
+    annotationProcessor "org.spongepowered:mixin:${mixin_version}:processor"
+    implementation fg.deobf("com.tterrag.registrate:Registrate:${registrate_version}")
+    if (rootMod.toBoolean()) {
+        jarJar(group: 'com.tterrag.registrate', name: 'Registrate', version: "[MC1.20,MC1.21)")
+    }
+}
+
+
+repositories {
+    flatDir {
+        dirs 'libs'
+    }
+    maven { url 'https://jitpack.io' }
+    maven {
+        // Location of the maven for vazkii's mods
+        name 'blamejared'
+        url 'https://maven.blamejared.com'
+    }
+    maven {
+        // Location of the maven for mixed mappings, Registrate, and Flywheel
+        name 'tterrag maven'
+        url 'https://maven.tterrag.com/'
+    }
+    maven {
+        name = "Modrinth"
+        url = "https://api.modrinth.com/maven"
+        content {
+            includeGroup "maven.modrinth"
+        }
+    }
+    maven {
+        url 'https://www.cursemaven.com'
+        content {
+            includeGroup "curse.maven"
+        }
+    }
+    maven {
+        url = "https://maven.theillusivec4.top/"
+    }
+
+    maven {
+        url 'https://maven.iafenvoy.com/releases/'
+        content {
+            includeGroup "com.iafenvoy"
+        }
+    }
+}
+
+dependencies {
+
+    implementation fg.deobf("dev.xkmc.l2library:l2library:${l2library_version}-slim")
+    implementation fg.deobf("dev.xkmc.l2serial:l2serial:1.2.2")
+    implementation fg.deobf("dev.xkmc.l2screentracker:l2screentracker:0.1.4")
+    implementation fg.deobf("dev.xkmc.l2tabs:l2tabs:0.3.3")
+    implementation fg.deobf("dev.xkmc.l2itemselector:l2itemselector:0.1.9")
+    implementation fg.deobf("dev.xkmc.l2damagetracker:l2damagetracker:0.3.7")
+    implementation fg.deobf("dev.xkmc.mob_weapon_api:mob_weapon_api:0.2.7")
+    implementation fg.deobf("dev.xkmc.modulargolems:modulargolems:${modulargolems_version}-slim")
+
+    implementation fg.deobf(jarJar("dev.xkmc.l2modularblock:l2modularblock:1.1.0")) {
+        transitive = false
+        jarJar.ranged(it, "[1.1.0,)")
+    }
+
+
+    implementation fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}")
+    implementation fg.deobf("mezz.jei:jei-${jei_minecraft_version}:${jei_version}")
+
+    runtimeOnly fg.deobf("curse.maven:attributefix-280510:4588114")
+    runtimeOnly fg.deobf("curse.maven:bookshelf-228525:4581675")
+    runtimeOnly fg.deobf("curse.maven:enchantment-descriptions-250419:4587429")
+
+    //runtimeOnly fg.deobf('curse.maven:appleskin-248787:4440123')
+
+    runtimeOnly fg.deobf("curse.maven:caelus-308989:4581481")
+    runtimeOnly fg.deobf("curse.maven:elytra-slot-317716:4598379")
+
+    implementation fg.deobf("curse.maven:jade-324717:4654448")
+    implementation fg.deobf("curse.maven:patchouli-306770:4966125")
+    runtimeOnly fg.deobf("curse.maven:geckolib-388172:6333474")
+    implementation fg.deobf("curse.maven:retro-damage-indicators-1003431:5268035")
+    compileOnly fg.deobf("curse.maven:architectury-api-419699:5137938")
+
+    compileOnly fg.deobf("curse.maven:pillagers-gun-948255:6875446")
+    implementation fg.deobf("curse.maven:timeless-and-classics-zero-1028108:6654541")
+
+
+}
+
+tasks.register('publishCurseForge', TaskPublishCurseForge) {
+    apiToken = secrets.get("curseforge_token")
+    def mainFile = upload(project.curseforge_project, new File("./build/libs/${modid}-${ll_version}.jar"))
+    mainFile.changelog = new File('./changelog.txt').text.split("\n\n\n")[0]
+    mainFile.addEnvironment("Client", "Server")
+    mainFile.addGameVersion("1.20.1")
+    mainFile.addModLoader("Forge", "NeoForge")
+    mainFile.addRequirement("l2library", "modulargolems")
+    mainFile.releaseType = "release"
+    disableVersionDetection()
+}
+
+modrinth {
+    token = secrets.get("modrinth_token")
+    projectId = project.modrinth_project
+    versionName = "Golem Dungoens ${project.ll_version}"
+    versionNumber = project.ll_version
+    versionType = "release"
+    uploadFile = new File("./build/libs/${modid}-${ll_version}.jar")
+    gameVersions = ["1.20.1"]
+    loaders = ["forge", "neoforge"]
+    changelog = new File('./changelog.txt').text.split("\n\n")[0]
+    dependencies {
+        required.project "l2library"
+        required.project "modular-golems"
+    }
+}
