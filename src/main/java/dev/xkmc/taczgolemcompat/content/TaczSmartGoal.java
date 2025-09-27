@@ -38,11 +38,11 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 	}
 
 	public boolean canUse() {
-		return isHoldingGun() && (isValidTarget() || !hasAmmo() && canReload());
+		return isHoldingGun() && (isValidTarget() || !hasAmmo() && canReload() || gunState == CHARGING);
 	}
 
 	public boolean canContinueToUse() {
-		return isHoldingGun() && (isValidTarget() || !hasAmmo() && canReload());
+		return isHoldingGun() && (isValidTarget() || !hasAmmo() && canReload() || gunState == CHARGING);
 	}
 
 	public void start() {
@@ -74,20 +74,22 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 	public void tick() {
 		LivingEntity target = mob.getTarget();
 		var gun = getGun();
-		if (target == null) return;
-		if (gun == null || !isHoldingGun()) return;
-		double range = mob.getAttributeValue(Attributes.FOLLOW_RANGE);
-		double dist = target.position().subtract(mob.position()).length();
 		ItemStack stack = mob.getMainHandItem();
-		boolean preloadOnly = isValidTarget() && (dist > range || seeTime < 5) && attackDelay == 0;
 		IGunOperator operator = IGunOperator.fromLivingEntity(mob);
-		if (isValidTarget() && canMeleeAttack(operator, target)) {
-			operator.melee();
-			return;
+		boolean preloadOnly = false;
+		if (gun == null || !isHoldingGun()) return;
+		if (target != null) {
+			double range = mob.getAttributeValue(Attributes.FOLLOW_RANGE);
+			double dist = target.position().subtract(mob.position()).length();
+			preloadOnly = isValidTarget() && (dist > range || seeTime < 5) && attackDelay == 0;
+			if (isValidTarget() && canMeleeAttack(operator, target)) {
+				operator.melee();
+				return;
+			}
+			strafing();
+			mob.getLookControl().setLookAt(target, 30, 90);
 		}
-		strafing();
-		mob.getLookControl().setLookAt(target, 30, 90);
-		if (getGun().isOverheatLocked(stack)) {
+		if (gun.isOverheatLocked(stack)) {
 			gunState = UNCHARGED;
 			return;
 		}

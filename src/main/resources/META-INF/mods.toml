@@ -31,10 +31,16 @@ description='''
 [[dependencies.taczgolemcompat]]
     modId="modulargolems"
     mandatory=true
-    versionRange="[2.6.7,)"
+    versionRange="[2.6.10,)"
     side="BOTH"
 [[dependencies.taczgolemcompat]]
     modId="tacz"
     mandatory=true
-    versionRange="[0,)"
+    versionRange="[1.1,)"
     side="BOTH"
+[[dependencies.taczgolemcompat]]
+    modId="l2backpack"
+    mandatory=false
+    versionRange="[2.5.5,)"
+    side="BOTH"
+    ordering="NONE"
