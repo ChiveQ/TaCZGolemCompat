@@ -11,6 +11,7 @@ import com.tacz.guns.resource.pojo.data.gun.Bolt;
 import com.tacz.guns.resource.pojo.data.gun.GunData;
 import com.tacz.guns.entity.shooter.ShooterDataHolder;
 import com.tacz.guns.util.AttachmentDataUtils;
+import com.tacz.guns.util.time.GunTime;
 import dev.xkmc.mob_weapon_api.api.ai.IWeaponHolder;
 import dev.xkmc.mob_weapon_api.api.goals.IMeleeGoal;
 import dev.xkmc.mob_weapon_api.example.goal.SmartRangedAttackGoal;
@@ -53,7 +54,7 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 		this.gunState = UNCHARGED;
 		var operator = IGunOperator.fromLivingEntity(mob);
 		operator.draw(mob::getMainHandItem);
-		operator.getDataHolder().drawTimestamp = System.currentTimeMillis() - 10000L;
+		operator.getDataHolder().drawTimestamp = GunTime.nowMillis() - 10000L;
 		syncGunId(operator);
 	}
 
@@ -289,7 +290,7 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 	}
 
 	public boolean canMeleeAttack(IGunOperator gunOperator, LivingEntity target) {
-		return System.currentTimeMillis() - gunOperator.getDataHolder().meleeTimestamp > 3000L && isValidTarget() && getAttackReachSqr(target) >= mob.distanceToSqr(target);
+		return GunTime.nowMillis() - gunOperator.getDataHolder().meleeTimestamp > 3000L && isValidTarget() && getAttackReachSqr(target) >= mob.distanceToSqr(target);
 	}
 
 	public double getAttackReachSqr(LivingEntity target) {
