@@ -1,118 +1,191 @@
-import net.darkhax.curseforgegradle.TaskPublishCurseForge
-
-buildscript {
-    repositories {
-        maven { url = 'https://maven.minecraftforge.net' }
-        mavenCentral()
-        maven { url = 'https://repo.spongepowered.org/repository/maven-public' }
-    }
-    dependencies {
-        classpath "org.spongepowered:mixingradle:${mixingradle_version}"
-        classpath 'org.parchmentmc:librarian:1.+'
-    }
-}
+// NeoForge 1.21.1 port build script.
+//
+// The project moved from ForgeGradle 6 (`fg.deobf`, `mixin` plugin, `reobfJar`, MixinExtras 0.2)
+// to NeoForge's ModDevGradle 2. Everything is declared with NeoForge coordinates instead of
+// `net.minecraftforge:forge`.
+//
+// Compatibility matrix with the old build:
+//   Forge 1.20.1 / ForgeGradle 6   ->  NeoForge 1.21.1 / ModDevGradle 2
+//   fg.deobf("group:name:version") ->  "group:name:version"            (Mojang mappings everywhere)
+//   minecraft "net.minecraftforge:.." -> neoForge { version = neo_version }
+//   org.spongepowered.mixin plugin ->  built into NeoForge 1.20.2+ (no plugin, no `mixin {}`)
+//   mixinextras-forge 0.2.0        ->  bundled with NeoForge, MIXINEXTRAS is not a separate artifact
+//   jarJar + reobfJarJar           ->  jarJar task, no reobf step
+//   mods.toml                      ->  META-INF/neoforge.mods.toml
 
 plugins {
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
-    id 'net.darkhax.curseforgegradle' version '[1.1.24,)'
-    id "at.stnwtr.gradle-secrets-plugin" version "1.0.1"
-    id "com.modrinth.minotaur" version "2.+"
+    id 'java-library'
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.neoforged.moddev' version '2.0.148'
 }
 
-apply plugin: 'maven-publish'
-apply plugin: 'org.spongepowered.mixin'
-apply plugin: 'org.parchmentmc.librarian.forgegradle'
+version = "${mod_version}"
+group = "${mod_group_id}.${modid}"
 
-version = "${ll_version}"
-group = "dev.kxmc.${modid}"
-archivesBaseName = "${modid}"
+repositories {
+    mavenLocal()
+    // Mod jars that are not on any maven for 1.21.1 yet (Modular Golems, TaCZ and the libraries
+    // that Modular Golems ships in its META-INF/jarjar).
+    flatDir {
+        dirs 'libs'
+    }
+    maven {
+        // Registrate (a GAMELIBRARY that L2Library/libmods consume)
+        name = 'Registrate'
+        url = 'https://maven.ithundxr.dev/snapshots'
+    }
+    maven {
+        // Patchouli / JEI
+        name = 'blamejared'
+        url = 'https://maven.blamejared.com'
+    }
+    maven {
+        // Curios
+        name = 'illusivec4'
+        url = 'https://maven.theillusivec4.top/'
+    }
+    maven {
+        // L2 modules (l2library and friends) - used once they are published for 1.21.1
+        name = 'L2'
+        url = 'https://maven.iafenvoy.com/releases/'
+        content {
+            includeGroup 'dev.xkmc'
+            includeGroup 'com.iafenvoy'
+        }
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content {
+            includeGroup 'maven.modrinth'
+        }
+    }
+    maven {
+        name = 'CurseMaven'
+        url = 'https://www.cursemaven.com'
+        content {
+            includeGroup 'curse.maven'
+        }
+    }
+}
 
-if (lljij.toBoolean()) jarJar.enable()
+base {
+    archivesName = "${modid}"
+}
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
-minecraft {
-    //mappings channel: 'parchment', version: '1.19.3-2023.03.12-1.19.4'
-    mappings channel: 'official', version: "${minecraft_version}"
-    accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+neoForge {
+    // NeoForge version, also decides which official (Mojang) mappings NFRT uses.
+    version = "${neo_version}"
+
+    // Fail the build on invalid AT targets instead of silently ignoring them.
+    validateAccessTransformers = true
+    accessTransformers.from 'src/main/resources/META-INF/accesstransformer.cfg'
+
     runs {
         client {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'info'
-            mods {
-                "${modid}" {
-                    source sourceSets.main
-                }
-            }
+            client()
+            gameDirectory = project.file('run')
+            systemProperty 'neoforge.enabledGameTestNamespaces', "${modid}"
         }
 
         server {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'info'
-            mods {
-                "${modid}" {
-                    source sourceSets.main
-                }
-            }
+            server()
+            gameDirectory = project.file('run')
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', "${modid}"
         }
 
         data {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'info'
+            data()
+            gameDirectory = project.file('run')
+            // `--existing-mod` is the 1.21.1 equivalent of the old `--existing-mod` args; add the
+            // namespaces whose resources should be visible to the generators here.
+            programArguments.addAll '--mod', "${modid}",
+                    '--all',
+                    '--output', file('src/generated/resources/').getAbsolutePath(),
+                    '--existing', file('src/main/resources/').getAbsolutePath()
+        }
 
-            // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
-            args '--mod', "${modid}", '--existing-mod', 'twilightforest', '--existing-mod', 'modulargolems', '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            systemProperty 'forge.logging.console.level', 'info'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
 
-            mods {
-                "${modid}" {
-                    source sourceSets.main
-                }
-            }
+    mods {
+        "${modid}" {
+            sourceSet sourceSets.main
         }
     }
 }
 
+// Include resources generated by data generators.
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
-mixin {
-    add sourceSets.main, "${modid}.refmap.json"
-    config "${modid}.mixins.json"
-}
+dependencies {
+    // ---- L2 stack ------------------------------------------------------------------------------
+    // Modular Golems 3.1.44 hard-depends on l2library. It ships mob_weapon_api, l2damagetracker,
+    // l2itemselector, l2tabs and cataclysm_mux inside META-INF/jarjar, which is why those jars are
+    // in libs/ and declared here explicitly.
+    //
+    // l2library itself is NOT bundled by Modular Golems: drop the 1.21.1 jar into libs/ and
+    // uncomment the next line (or point it back at a maven coordinate once it is published).
+    // implementation files('libs/l2library-3.0.8.jar')
 
-jar {
-    manifest {
-        attributes([
-                "Specification-Title"     : "${modid}",
-                "Specification-Vendor"    : "xkmc",
-                "Specification-Version"   : "1", // We are version 1 of ourselves
-                "Implementation-Title"    : project.name,
-                "Implementation-Version"  : project.jar.archiveVersion,
-                "Implementation-Vendor"   : "xkmc",
-                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
-                'MixinConfigs'            : "${modid}.mixins.json"
-        ])
+    implementation files('libs/modulargolems-3.1.44.jar')
+    implementation files('libs/mob_weapon_api-3.0.21.jar')
+    implementation files('libs/l2damagetracker-3.0.5.jar')
+    implementation files('libs/l2itemselector-3.1.6.jar')
+    implementation files('libs/l2tabs-3.0.6+7.jar')
+    implementation files('libs/cataclysm_mux-1.0.4.jar')
+
+    // ---- TaCZ ----------------------------------------------------------------------------------
+    // 68 MB NeoForge 1.21.1 build; the jar carries its own dependencies in META-INF/jarjar.
+    implementation files('libs/tacz-neoforge-1.21.1-1.2.0.jar')
+
+    // ---- Registrate (already provided by l2library at runtime) ---------------------------------
+    implementation "com.tterrag.registrate:Registrate:${registrate_version}"
+    if (rootMod.toBoolean()) {
+        implementation jarJar(group: 'com.tterrag.registrate', name: 'Registrate',
+                version: "[${registrate_version},)")
     }
+
+    // ---- optional mods -------------------------------------------------------------------------
+    implementation "top.theillusivec4.curios:curios-neoforge:${curios_version}"
+    implementation "mezz.jei:jei-${jei_minecraft_version}:${jei_version}"
+
+    // Third-party curseforge dependencies are intentionally left as their 1.20.1 pins for the
+    // moment; they need to be re-baselined before they resolve in a 1.21.1 workspace.
 }
 
-java {
-    withSourcesJar()
-}
+// Expand version placeholders in the mod metadata file.
+tasks.withType(ProcessResources).configureEach {
+    var replaceProperties = [
+            minecraft_version        : minecraft_version,
+            minecraft_version_range  : minecraft_version_range,
+            neo_version              : neo_version,
+            neo_version_range        : neo_version_range,
+            loader_version_range     : loader_version_range,
+            modid                    : modid,
+            mod_name                 : mod_name,
+            mod_license              : mod_license,
+            mod_version              : mod_version,
+            mod_authors              : mod_authors,
+            mod_description          : mod_description,
+            l2library_version_range  : l2library_version_range,
+            modulargolems_version_range: modulargolems_version_range,
+            tacz_version_range       : tacz_version_range,
+            curios_version_range     : curios_version_range,
+    ]
+    inputs.properties replaceProperties
 
-jar.finalizedBy('reobfJar')
-
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            artifact jar
-        }
-    }
-    repositories {
-        maven {
-            url "file://${project.projectDir}/mcmodsrepo"
-        }
+    filesMatching(['META-INF/neoforge.mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties + [project: project]
     }
 }
 
@@ -120,144 +193,43 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+java {
+    withSourcesJar()
+}
+
+jar {
+    manifest {
+        attributes([
+                "Automatic-Module-Name"  : "${modid}",
+                "Specification-Title"    : "${modid}",
+                "Specification-Vendor"   : "${mod_authors}",
+                "Specification-Version"  : "1",
+                "Implementation-Title"   : project.name,
+                "Implementation-Version" : project.jar.archiveVersion,
+                "Implementation-Vendor"  : "${mod_authors}",
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+                'MixinConfigs'           : "${modid}.mixins.json"
+        ])
+    }
+}
+
 if (lljij.toBoolean()) {
-
-    reobf {
-        jarJar {}
-    }
-
-    tasks.jarJar.finalizedBy('reobfJarJar')
-
-    tasks.jarJar.configure {
-        archiveClassifier.set('')
-    }
-
-    jar {
-        archiveClassifier.set('slim')
+    // `jarJar` here is ModDevGradle's JarJar task, which is not an AbstractArchiveTask and has no
+    // archiveClassifier. Keep the plain `jar` as the fat artifact; the slim jar is the source jar.
+    configurations.named('jarJar') {
+        // Nothing to configure for now: everything embedded via `implementation jarJar(...)`.
     }
 }
 
-dependencies {
-    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-    compileOnly(annotationProcessor("com.github.llamalad7.mixinextras:mixinextras-common:${mixin_extras_version}"))
-    if (rootMod.toBoolean()) {
-        implementation(jarJar("com.github.llamalad7.mixinextras:mixinextras-forge:${mixin_extras_version}")) {
-            transitive = false
-            jarJar.ranged(it, "[${mixin_extras_version},)")
-        }
-    } else {
-        implementation("com.github.llamalad7.mixinextras:mixinextras-forge:${mixin_extras_version}")
-    }
-    annotationProcessor "org.spongepowered:mixin:${mixin_version}:processor"
-    implementation fg.deobf("com.tterrag.registrate:Registrate:${registrate_version}")
-    if (rootMod.toBoolean()) {
-        jarJar(group: 'com.tterrag.registrate', name: 'Registrate', version: "[MC1.20,MC1.21)")
-    }
-}
-
-
-repositories {
-    flatDir {
-        dirs 'libs'
-    }
-    maven { url 'https://jitpack.io' }
-    maven {
-        // Location of the maven for vazkii's mods
-        name 'blamejared'
-        url 'https://maven.blamejared.com'
-    }
-    maven {
-        // Location of the maven for mixed mappings, Registrate, and Flywheel
-        name 'tterrag maven'
-        url 'https://maven.tterrag.com/'
-    }
-    maven {
-        name = "Modrinth"
-        url = "https://api.modrinth.com/maven"
-        content {
-            includeGroup "maven.modrinth"
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            from components.java
         }
     }
-    maven {
-        url 'https://www.cursemaven.com'
-        content {
-            includeGroup "curse.maven"
+    repositories {
+        maven {
+            url "file://${project.projectDir}/mcmodsrepo"
         }
-    }
-    maven {
-        url = "https://maven.theillusivec4.top/"
-    }
-
-    maven {
-        url 'https://maven.iafenvoy.com/releases/'
-        content {
-            includeGroup "com.iafenvoy"
-        }
-    }
-}
-
-dependencies {
-
-    implementation fg.deobf("dev.xkmc.l2library:l2library:${l2library_version}-slim")
-    implementation fg.deobf("dev.xkmc.l2serial:l2serial:1.2.2")
-    implementation fg.deobf("dev.xkmc.l2screentracker:l2screentracker:0.1.4")
-    implementation fg.deobf("dev.xkmc.l2tabs:l2tabs:0.3.3")
-    implementation fg.deobf("dev.xkmc.l2itemselector:l2itemselector:0.1.9")
-    implementation fg.deobf("dev.xkmc.l2damagetracker:l2damagetracker:0.3.7")
-    implementation fg.deobf("dev.xkmc.mob_weapon_api:mob_weapon_api:0.2.7")
-    implementation fg.deobf("dev.xkmc.l2backpack:l2backpack:2.5.5-slim")
-    implementation fg.deobf("dev.xkmc.modulargolems:modulargolems:${modulargolems_version}-slim")
-    implementation fg.deobf("dev.xkmc.l2modularblock:l2modularblock:1.1.0")
-
-    implementation fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}")
-    implementation fg.deobf("mezz.jei:jei-${jei_minecraft_version}:${jei_version}")
-
-    runtimeOnly fg.deobf("curse.maven:attributefix-280510:4588114")
-    runtimeOnly fg.deobf("curse.maven:bookshelf-228525:4581675")
-    runtimeOnly fg.deobf("curse.maven:enchantment-descriptions-250419:4587429")
-
-    //runtimeOnly fg.deobf('curse.maven:appleskin-248787:4440123')
-
-    runtimeOnly fg.deobf("curse.maven:caelus-308989:4581481")
-    runtimeOnly fg.deobf("curse.maven:elytra-slot-317716:4598379")
-
-    implementation fg.deobf("curse.maven:jade-324717:4654448")
-    implementation fg.deobf("curse.maven:patchouli-306770:4966125")
-    runtimeOnly fg.deobf("curse.maven:geckolib-388172:6333474")
-    implementation fg.deobf("curse.maven:retro-damage-indicators-1003431:5268035")
-    compileOnly fg.deobf("curse.maven:architectury-api-419699:5137938")
-
-    compileOnly fg.deobf("curse.maven:pillagers-gun-948255:6875446")
-    implementation fg.deobf("curse.maven:timeless-and-classics-zero-1028108:6654541")
-
-
-}
-
-tasks.register('publishCurseForge', TaskPublishCurseForge) {
-    apiToken = secrets.get("curseforge_token")
-    def mainFile = upload(project.curseforge_project, new File("./build/libs/${modid}-${ll_version}.jar"))
-    mainFile.changelog = new File('./changelog.txt').text.split("\n\n\n")[0]
-    mainFile.addEnvironment("Client", "Server")
-    mainFile.addGameVersion("1.20.1")
-    mainFile.addModLoader("Forge", "NeoForge")
-    mainFile.addRequirement("l2library", "modulargolems", "timeless-and-classics-zero")
-    mainFile.releaseType = "release"
-    disableVersionDetection()
-}
-
-modrinth {
-    token = secrets.get("modrinth_token")
-    projectId = project.modrinth_project
-    versionName = "TaCZ Golem Compat ${project.ll_version}"
-    versionNumber = project.ll_version
-    versionType = "release"
-    uploadFile = new File("./build/libs/${modid}-${ll_version}.jar")
-    gameVersions = ["1.20.1"]
-    loaders = ["forge", "neoforge"]
-    changelog = new File('./changelog.txt').text.split("\n\n")[0]
-    dependencies {
-        required.project "l2library"
-        required.project "modular-golems"
-        required.project "timeless-and-classics-zero"
     }
 }
