@@ -135,7 +135,7 @@ dependencies {
     //
     // l2library itself is NOT bundled by Modular Golems: drop the 1.21.1 jar into libs/ and
     // uncomment the next line (or point it back at a maven coordinate once it is published).
-    // implementation files('libs/l2library-3.0.8.jar')
+    implementation files('libs/l2library-3.0.8.jar')
 
     implementation files('libs/modulargolems-3.1.44.jar')
     implementation files('libs/mob_weapon_api-3.0.21.jar')
@@ -185,7 +185,7 @@ tasks.withType(ProcessResources).configureEach {
     inputs.properties replaceProperties
 
     filesMatching(['META-INF/neoforge.mods.toml', 'pack.mcmeta']) {
-        expand replaceProperties + [project: project]
+        expand replaceProperties// + [project: project]
     }
 }
 

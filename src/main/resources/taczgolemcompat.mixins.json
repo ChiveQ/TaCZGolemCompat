@@ -3,7 +3,6 @@
 	"priority": 1000,
 	"package": "dev.xkmc.taczgolemcompat.mixin",
 	"compatibilityLevel": "JAVA_21",
-	"refmap": "taczgolemcompat.refmap.json",
 	"mixins": [
 		"EntityKineticBulletMixin",
 		"EntityUtilMixin",

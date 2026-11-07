@@ -2,12 +2,15 @@ package dev.xkmc.taczgolemcompat.content;
 
 import com.tacz.guns.api.TimelessAPI;
 import com.tacz.guns.api.entity.IGunOperator;
+import com.tacz.guns.api.entity.ShootResult;
 import com.tacz.guns.api.item.IGun;
 import com.tacz.guns.api.item.gun.AbstractGunItem;
 import com.tacz.guns.api.item.gun.FireMode;
 import com.tacz.guns.resource.index.CommonGunIndex;
 import com.tacz.guns.resource.pojo.data.gun.Bolt;
 import com.tacz.guns.resource.pojo.data.gun.GunData;
+import com.tacz.guns.entity.shooter.ShooterDataHolder;
+import com.tacz.guns.util.AttachmentDataUtils;
 import dev.xkmc.mob_weapon_api.api.ai.IWeaponHolder;
 import dev.xkmc.mob_weapon_api.api.goals.IMeleeGoal;
 import dev.xkmc.mob_weapon_api.example.goal.SmartRangedAttackGoal;
@@ -51,6 +54,28 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 		var operator = IGunOperator.fromLivingEntity(mob);
 		operator.draw(mob::getMainHandItem);
 		operator.getDataHolder().drawTimestamp = System.currentTimeMillis() - 10000L;
+		syncGunId(operator);
+	}
+
+	/**
+	 * TaCZ 1.2.0+ gates every state-changing gun action behind {@code GunScriptGuard}, which
+	 * silently returns without doing anything when {@code ShooterDataHolder.currentGunId} is
+	 * null or does not match the held gun:
+	 * <pre>
+	 *   if (id == null || !id.equals(data.currentGunId)) return;
+	 * </pre>
+	 * {@code currentGunId} is only assigned by {@code setCurrentGunItem}, which is called from
+	 * {@code LivingEntityDrawGun#draw} — but {@code draw} first runs {@code initialData()},
+	 * which resets {@code currentGunId} to null, so the two must be kept in lockstep. Since
+	 * {@code draw()} costs a full draw animation, we also reset only the id here so a mob can
+	 * keep firing without re-playing the draw every time.
+	 */
+	private void syncGunId(IGunOperator operator) {
+		ItemStack stack = mob.getMainHandItem();
+		ShooterDataHolder data = operator.getDataHolder();
+		IGun gun = IGun.getIGunOrNull(stack);
+		data.currentGunId = gun == null ? null : gun.getGunId(stack);
+		data.gunScriptFailed = false;
 	}
 
 	public void stop() {
@@ -61,6 +86,7 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 		var gun = getGun();
 		if (gun != null && isHoldingGun()) {
 			IGunOperator operator = IGunOperator.fromLivingEntity(mob);
+			syncGunId(operator);
 			operator.cancelReload();
 			operator.aim(false);
 			GunData gunData = TimelessAPI.getCommonGunIndex(gun.getGunId(mob.getMainHandItem())).map(CommonGunIndex::getGunData).orElse(null);
@@ -78,6 +104,9 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 		IGunOperator operator = IGunOperator.fromLivingEntity(mob);
 		boolean preloadOnly = false;
 		if (gun == null || !isHoldingGun()) return;
+		// Refreshed every tick: TaCZ's server tick path and any draw() reset this back to null,
+		// which makes reload()/bolt()/melee() silently no-op through GunScriptGuard.
+		syncGunId(operator);
 		if (target != null) {
 			double range = mob.getAttributeValue(Attributes.FOLLOW_RANGE);
 			double dist = target.position().subtract(mob.position()).length();
@@ -100,6 +129,10 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 			gunState = UNCHARGED;
 		}
 		if (gunState == UNCHARGED) {
+			// Top the dummy clip up first: canReload() reads the dummy amount directly in 1.21.1,
+			// so refilling afterwards would leave the goal stuck in UNCHARGED forever.
+			GunData data = TimelessAPI.getCommonGunIndex(gun.getGunId(stack)).map(CommonGunIndex::getGunData).orElse(null);
+			if (data != null) refillDummyAmmo(stack, data);
 			if (!preloadOnly && canReload()) {
 				operator.reload();
 				gunState = CHARGING;
@@ -110,6 +143,7 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 		} else if (gunState == CHARGING) {
 			if (!isHoldingGun()) {
 				gunState = UNCHARGED;
+				return;
 			}
 			if (!operator.getDataHolder().reloadStateType.isReloading()) {
 				if (hasAmmo()) {
@@ -134,8 +168,15 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 			if (data != null) {
 				for (attackCount += gun.getFireMode(stack) == FireMode.AUTO ? gun.getRPM(stack) / 1200d : gun.getRPM(stack) / (Math.max(1200 * (target.distanceTo(mob) / 8), 2400)); attackCount >= 1; --attackCount) {
 					if (isHoldingGun()) {
-						operator.shoot(mob::getXRot, mob::getYHeadRot);
-						if (data.getBolt() == Bolt.MANUAL_ACTION) {
+						// In 1.21.1 shoot() can legitimately fail (COOL_DOWN / IS_DRAWING / IS_BOLTING),
+						// and the tactical bolt is now part of the gun's own state machine, so only
+						// subtract from our local count and re-bolt when the shot actually happened.
+						ShootResult result = operator.shoot(mob::getXRot, mob::getYHeadRot);
+						if (result != ShootResult.SUCCESS) {
+							attackCount = 0;
+							break;
+						}
+						if (data.getBolt() == Bolt.MANUAL_ACTION && !operator.getDataHolder().isBolting) {
 							operator.bolt();
 						}
 
@@ -166,15 +207,35 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 
 	private boolean canReload() {
 		if (holder.toUser().bypassAllConsumption()) return true;
-		IGun item = this.getGun();
-		if (item instanceof AbstractGunItem gun) {
-			ItemStack stack = mob.getItemInHand(InteractionHand.MAIN_HAND);
-			if (gun.useDummyAmmo(stack) && gun.getDummyAmmoAmount(stack) == 0) {
-				stack.getOrCreateTag().remove("DummyAmmo");
-			}
-			return gun.canReload(mob, stack);
-		} else {
-			return false;
+		ItemStack stack = mob.getItemInHand(InteractionHand.MAIN_HAND);
+		IGun gun = IGun.getIGunOrNull(stack);
+		if (!(gun instanceof AbstractGunItem abstractGun)) return false;
+		// TaCZ 1.21.1's AbstractGunItem#canReload already resolves dummy ammo itself:
+		//   reloadData.isInfinite() -> true
+		//   useDummyAmmo(stack)     -> getDummyAmmoAmount(stack) > 0
+		//   otherwise               -> entity capability Capabilities.ItemHandler.ENTITY
+		// It no longer falls through from dummy ammo to the inventory, so clearing the
+		// DummyAmmo tag (what the 1.20.1 build did) can only ever make this return false.
+		return abstractGun.canReload(mob, stack);
+	}
+
+	/**
+	 * Give a gun with {@code useDummyAmmo} a fresh clip so that {@code canReload} passes and
+	 * {@code tickReload} can actually finish. Mobs have no {@code Capabilities.ItemHandler.ENTITY},
+	 * so dummy ammo is the only reload source available to them.
+	 * <p>
+	 * Note that {@code useDummyAmmo()} is {@code getUnsafe().contains("DummyAmmo", 3)}: the key has
+	 * to exist, so a gun that never had a clip stays "no dummy ammo" until we write one here.
+	 */
+	private void refillDummyAmmo(ItemStack stack, GunData data) {
+		IGun gun = IGun.getIGunOrNull(stack);
+		if (gun == null) return;
+		// A gun that reloads from the inventory instead never needs (and ignores) dummy ammo.
+		if (gun.useInventoryAmmo(stack)) return;
+		int capacity = Math.max(AttachmentDataUtils.getAmmoCountWithAttachment(stack, data), 1);
+		int target = Math.max(gun.getMaxDummyAmmoAmount(stack), capacity);
+		if (gun.getDummyAmmoAmount(stack) < target) {
+			gun.setDummyAmmoAmount(stack, target);
 		}
 	}
 
@@ -209,7 +270,13 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 			GunData gunData = TimelessAPI.getCommonGunIndex(gun.getGunId(stack)).map(CommonGunIndex::getGunData).orElse(null);
 			if (gunData != null) {
 				if (gun.useInventoryAmmo(stack)) return -1;
-				return gun.getCurrentAmmoCount(stack) + (gun.hasBulletInBarrel(stack) && gunData.getBolt() != Bolt.OPEN_BOLT ? 1 : 0);
+				int chambered = gun.hasBulletInBarrel(stack) && gunData.getBolt() != Bolt.OPEN_BOLT ? 1 : 0;
+				// Mobs reload from dummy ammo, which is stored outside GunCurrentAmmoCount.
+				// Counting it here keeps the mob firing across clips instead of idling early.
+				if (gun.useDummyAmmo(stack) && gun.getDummyAmmoAmount(stack) > 0) {
+					return gun.getCurrentAmmoCount(stack) + chambered + gun.getDummyAmmoAmount(stack);
+				}
+				return gun.getCurrentAmmoCount(stack) + chambered;
 			}
 		}
 
