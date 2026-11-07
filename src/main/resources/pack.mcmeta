@@ -1,6 +1,10 @@
 {
     "pack": {
         "description": "modular golem resources",
-        "pack_format": 9
+        "pack_format": 34,
+        "supported_formats": [
+            34,
+            46
+        ]
     }
 }
