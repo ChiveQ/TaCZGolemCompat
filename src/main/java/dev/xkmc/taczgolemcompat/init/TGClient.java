@@ -1,15 +1,18 @@
 package dev.xkmc.taczgolemcompat.init;
 
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 
-@Mod.EventBusSubscriber(value = Dist.CLIENT, modid = TaCZGolem.MODID, bus = Mod.EventBusSubscriber.Bus.MOD)
+@Mod(value = TaCZGolem.MODID, dist = Dist.CLIENT)
 public class TGClient {
 
-	@SubscribeEvent
-	public static void clientSetup(FMLClientSetupEvent event) {
+	public TGClient(IEventBus bus){
+		bus.addListener(this::clientSetup);
+	}
+
+	private void clientSetup(FMLClientSetupEvent event) {
 	}
 
 }
