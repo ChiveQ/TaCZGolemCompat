@@ -4,6 +4,7 @@ import com.tacz.guns.api.TimelessAPI;
 import com.tacz.guns.api.entity.IGunOperator;
 import com.tacz.guns.api.entity.ShootResult;
 import com.tacz.guns.api.item.IAmmo;
+import com.tacz.guns.api.item.IAmmoBox;
 import com.tacz.guns.api.item.IGun;
 import com.tacz.guns.api.item.gun.AbstractGunItem;
 import com.tacz.guns.api.item.gun.FireMode;
@@ -14,7 +15,6 @@ import com.tacz.guns.entity.shooter.ShooterDataHolder;
 import com.tacz.guns.util.AttachmentDataUtils;
 import com.tacz.guns.util.time.GunTime;
 import dev.xkmc.mob_weapon_api.api.ai.IWeaponHolder;
-import dev.xkmc.mob_weapon_api.api.ai.ItemWrapper;
 import dev.xkmc.mob_weapon_api.api.goals.IMeleeGoal;
 import dev.xkmc.mob_weapon_api.example.goal.SmartRangedAttackGoal;
 import dev.xkmc.modulargolems.content.entity.common.SweepGolemEntity;
@@ -25,7 +25,10 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.items.IItemHandlerModifiable;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 import static dev.xkmc.taczgolemcompat.content.TaczSmartGoal.GunState.*;
 
@@ -256,8 +259,8 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 	 * <p>
 	 * Mobs have no {@code Capabilities.ItemHandler.ENTITY}, so in TaCZ 1.21.1 dummy ammo is the
 	 * only reload source available to them ({@code AbstractGunItem#canReload} no longer falls
-	 * through from dummy ammo to the inventory). The stock is taken from the golem's ammo slot,
-	 * so the mob has to be resupplied instead of getting an infinite clip.
+	 * through from dummy ammo to the inventory). The stock is pulled from every inventory the
+	 * golem owns, so the mob has to be resupplied instead of getting an infinite clip.
 	 * <p>
 	 * Note that {@code useDummyAmmo()} is {@code getUnsafe().contains("DummyAmmo", 3)}: the key has
 	 * to exist, so a gun that never had a clip stays "no dummy ammo" until we write one here.
@@ -281,34 +284,62 @@ public class TaczSmartGoal<T extends Mob> extends SmartRangedAttackGoal<T> {
 	}
 
 	/**
-	 * Pull matching rounds out of the golem's ammo slot. Returns how many were actually taken.
+	 * Pull matching rounds out of every inventory the golem owns. Returns how many were taken.
+	 * <p>
+	 * {@code SweepGolemEntity#aggregateInventories} covers the hands, the armor slots, the golem's
+	 * own ammo slot and whatever other mods contribute through {@code GolemCollectInventoryEvent},
+	 * which is exactly the set of places 1.20.1 used to reach through the entity item handler.
+	 * Both loose {@code tacz:ammo} and ammo boxes are accepted, in any amount.
 	 */
 	private int extractAmmo(ItemStack gunStack, int wanted) {
 		if (wanted <= 0) return 0;
-		ItemWrapper slot = getAmmoSlot();
-		if (slot == null) return 0;
-		ItemStack ammo = slot.getItem();
-		if (ammo.isEmpty()) return 0;
-		IAmmo type = IAmmo.getIAmmoOrNull(ammo);
-		if (type == null || !type.isAmmoOfGun(gunStack, ammo)) return 0;
-		int taken = Math.min(wanted, ammo.getCount());
-		// The wrapper hands out a copy on the client; always write the remainder back.
-		ItemStack rest = ammo.copy();
-		rest.shrink(taken);
-		slot.setItem(rest);
+		int taken = 0;
+		for (IItemHandlerModifiable handler : getInventories()) {
+			for (int i = 0; i < handler.getSlots() && taken < wanted; i++) {
+				taken += takeFromSlot(handler, i, gunStack, wanted - taken);
+			}
+			if (taken >= wanted) break;
+		}
 		return taken;
 	}
 
-	@Nullable
-	@SuppressWarnings("rawtypes")
-	private ItemWrapper getAmmoSlot() {
-		// Modular Golems keeps gun ammunition in its own slot, outside any item handler.
+	/**
+	 * Drain up to {@code wanted} matching rounds from a single slot, mutating the slot in place.
+	 */
+	private int takeFromSlot(IItemHandlerModifiable handler, int slot, ItemStack gunStack, int wanted) {
+		ItemStack stored = handler.getStackInSlot(slot);
+		if (stored.isEmpty()) return 0;
+		IAmmo ammo = IAmmo.getIAmmoOrNull(stored);
+		if (ammo != null && ammo.isAmmoOfGun(gunStack, stored)) {
+			int taken = Math.min(wanted, stored.getCount());
+			stored.shrink(taken);
+			handler.setStackInSlot(slot, stored.isEmpty() ? ItemStack.EMPTY : stored);
+			return taken;
+		}
+		// An ammo box holds rounds of one type inside its own NBT; drain it in place.
+		IAmmoBox box = stored.getItem() instanceof IAmmoBox boxItem ? boxItem : null;
+		if (box != null && box.isAmmoBoxOfGun(gunStack, stored)) {
+			int available = box.getAmmoCount(stored);
+			if (available <= 0) return 0;
+			int taken = Math.min(wanted, available);
+			box.setAmmoCount(stored, available - taken);
+			handler.setStackInSlot(slot, stored);
+			return taken;
+		}
+		return 0;
+	}
+
+	/**
+	 * Every inventory the golem can draw ammunition from.
+	 */
+	@SuppressWarnings({"rawtypes", "unchecked"})
+	private List<IItemHandlerModifiable> getInventories() {
 		// SweepGolemEntity<T extends SweepGolemEntity<T, P>, P> is self-referential, so no
 		// wildcard instantiation of it is valid and the raw type has to be used.
 		if (holder instanceof SweepGolemEntity golem) {
-			return golem.getArrowSlot();
+			return (List<IItemHandlerModifiable>) (List<?>) golem.aggregateInventories();
 		}
-		return null;
+		return List.of();
 	}
 
 	@Nullable
